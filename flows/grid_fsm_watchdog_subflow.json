@@ -1,0 +1,87 @@
+{
+  "id": "subflow_grid_fsm_watchdog",
+  "type": "subflow",
+  "name": "Grid FSM + Watchdog (Victron ESS)",
+  "info": "Deterministic Grid FSM with VE.Bus Watchdog and Safe Output Gate.\n\nInputs:\n- FSM command (payload: GRID.ON/OFF)\n- VE.Bus health (topic: victron_bus_health)\n\nOutput:\n- Safe grid command for Victron output node.",
+  "in": [
+    {
+      "x": 40,
+      "y": 80,
+      "wires": [
+        {
+          "id": "fsm_in"
+        }
+      ]
+    },
+    {
+      "x": 40,
+      "y": 160,
+      "wires": [
+        {
+          "id": "health_in"
+        }
+      ]
+    }
+  ],
+  "out": [
+    {
+      "x": 760,
+      "y": 120,
+      "wires": [
+        {
+          "id": "wrapper_out",
+          "port": 0
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "fsm_in",
+      "type": "subflow:in",
+      "name": "FSM Command In",
+      "x": 120,
+      "y": 80,
+      "wires": [
+        [
+          "watchdog_gate"
+        ]
+      ]
+    },
+    {
+      "id": "health_in",
+      "type": "subflow:in",
+      "name": "VE.Bus Health In",
+      "x": 120,
+      "y": 160,
+      "wires": [
+        [
+          "watchdog_gate"
+        ]
+      ]
+    },
+    {
+      "id": "watchdog_gate",
+      "type": "function",
+      "name": "Watchdog Gate",
+      "x": 540,
+      "y": 120,
+      "func": "// === Watchdog Gate (Subflow) ===\nconst GRID = flow.get(\"GRID\") ?? { OFF: 2, ON: 3 };\nconst cfg = flow.get(\"WATCHDOG_GATE_CFG\") ?? { SAFE_STATE: GRID.ON, ALLOW_STALE: true };\nconst ctx = context.get(\"gate\") ?? { health: \"OK\", forcedCount: 0 };\n\nif (msg.topic === \"victron_bus_health\") {\n    ctx.health = msg.payload;\n    context.set(\"gate\", ctx);\n    return null;\n}\n\nlet outPayload = msg.payload;\nlet forced = false;\n\nswitch (ctx.health) {\n    case \"OK\": break;\n    case \"STALE\": if (!cfg.ALLOW_STALE) { outPayload = cfg.SAFE_STATE; forced = true; } break;\n    case \"LOST\":\n    case \"RECOVERING\": outPayload = cfg.SAFE_STATE; forced = true; break;\n}\n\nif (forced) {\n    ctx.forcedCount += 1;\n    context.set(\"gate\", ctx);\n}\n\nreturn [{\n    payload: outPayload,\n    reason: forced ? \"WATCHDOG_FORCE\" : msg.reason,\n    watchdog: { health: ctx.health, forced, forcedCount: ctx.forcedCount }\n}];",
+      "outputs": 1,
+      "noerr": 0,
+      "wires": [
+        [
+          "wrapper_out"
+        ]
+      ]
+    },
+    {
+      "id": "wrapper_out",
+      "type": "subflow:out",
+      "name": "Safe Command Out",
+      "x": 680,
+      "y": 120,
+      "wires": []
+    }
+  ]
+}
